@@ -1,0 +1,58 @@
+data:
+  raw_path: "data/raw/EUPDCorp.csv"        # download from https://zenodo.org/records/15056399
+  output_path: "data/processed/ep_ai_speeches.csv"
+  results_path: "data/processed/ep_ai_classified.csv"
+  analysis_path: "data/processed/ep_ai_analysis.csv"
+
+corpus:
+  keywords:
+    - "artificial intelligence"
+    - "machine learning"
+    - "algorithm"
+    - "AI Act"
+    - "automated decision"
+    - "deep learning"
+    - "neural network"
+  min_speech_length: 100
+  years: [2019, 2020, 2021, 2022, 2023, 2024]
+  term: 9                                   # 9th EP term only
+
+model:
+  name: "MoritzLaurer/deberta-v3-large-zeroshot-v2.0"
+  device: "mps"                             # Apple Silicon; change to "cpu" if needed
+  batch_size: 16
+  multi_label: true
+
+framings:
+  risk_based:
+    label: "risk_based"
+    hypothesis: "This speech focuses on risks, safety concerns, liability, or the need to regulate harmful AI systems."
+  rights_based:
+    label: "rights_based"
+    hypothesis: "This speech focuses on fundamental rights, privacy, non-discrimination, or human dignity in relation to AI."
+  innovation_focused:
+    label: "innovation_focused"
+    hypothesis: "This speech focuses on innovation, economic competitiveness, investment, or reducing regulatory burden on AI."
+  sovereignty_focused:
+    label: "sovereignty_focused"
+    hypothesis: "This speech focuses on European strategic autonomy, technological sovereignty, or reducing dependency on non-European AI."
+
+analysis:
+  # Standard EP group to party family mapping
+  party_family:
+    EPP: "Christian Democrat / Conservative"
+    "S&D": "Social Democrat"
+    Renew: "Liberal"
+    "Greens/EFA": "Green / Regionalist"
+    ECR: "Conservative / Eurosceptic"
+    ID: "Radical Right"
+    "GUE-NGL": "Radical Left"
+    NI: "Non-attached"
+
+  # East-West coding (2004+ accession countries = East)
+  east_countries: [PL, CZ, SK, HU, SI, EE, LV, LT, RO, BG, HR, CY, MT]
+  west_countries: [DE, FR, IT, ES, PT, NL, BE, LU, AT, SE, DK, FI, IE, GR]
+
+  # North-South coding
+  north_countries: [SE, DK, FI, EE, LV, LT, DE, NL, BE, LU, AT, IE]
+  south_countries: [IT, ES, PT, GR, CY, MT, HR, SI, RO, BG]
