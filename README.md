@@ -1,8 +1,8 @@
-# ep-ai-framing
+# AI Act Framing of speeches from Members of the European Parliament
 
-Transformer-based framing analysis of AI Act debates in the European Parliament (2019–2024).
+Zero-shot transformer classification of AI governance framings in European Parliament debates (2019–2024), mapping risk-based, rights-based, innovation-focused, and sovereignty-focused discourse onto party family and East-West/North-South cleavages.
 
-Classifies MEP speeches into four AI governance framings — risk-based, rights-based, innovation-focused, sovereignty-focused — and maps these onto party family, nationality, and East-West/North-South cleavages.
+This repository implements a transformer-based framing analysis of European Parliament debates on artificial intelligence (2019–2024). Using zero-shot NLI classification, it categorises MEP speeches into four governance framings and examines how these map onto party family, national identity, and regional cleavages in EU integration debates.
 
 ## Research design
 
