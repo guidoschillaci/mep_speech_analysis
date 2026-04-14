@@ -1,2 +1,101 @@
-# mep_speech_analysis
-Speech analysis on AI from Members of the European Parliament
+# ep-ai-framing
+
+Transformer-based framing analysis of AI Act debates in the European Parliament (2019–2024).
+
+Classifies MEP speeches into four AI governance framings — risk-based, rights-based, innovation-focused, sovereignty-focused — and maps these onto party family, nationality, and East-West/North-South cleavages.
+
+## Research design
+
+- **Corpus**: EUPDCorp (Zenodo, DOI: 10.5281/zenodo.15056399) — 563,696 EP speeches 1999–2024, with English translations and nationality/party metadata
+- **Time window**: 2019–2024 (9th EP term, AI Act period)
+- **Classifier**: `MoritzLaurer/deberta-v3-large-zeroshot-v2.0` via HuggingFace zero-shot NLI
+- **Unit of analysis**: speech level (dominant framing); MEP level for regression
+- **Validation**: few-shot — ~30 manually annotated examples per framing class
+
+## Repo structure
+
+```
+ep-ai-framing/
+├── config.yaml                  # all parameters: paths, keywords, model, framings, cleavage codings
+├── requirements.txt
+├── .gitignore
+├── src/
+│   ├── 00_download_data.py      # download EUPDCorp from Zenodo
+│   ├── 01_filter_corpus.py      # keyword filter, year filter, cleavage variable construction
+│   ├── 02_classify.py           # zero-shot framing classification
+│   ├── 03_validate.py           # evaluate classifier against gold standard
+│   └── 04_analyse.py            # descriptive tables + OLS regressions
+├── validation/
+│   └── annotation_template.csv  # seed examples; add ~30 per class before running 03
+├── data/
+│   ├── raw/                     # EUPDCorp.csv goes here (not tracked by git)
+│   └── processed/               # pipeline outputs (not tracked by git)
+└── notebooks/
+    └── 01_explore.ipynb         # EDA on filtered corpus
+```
+
+## Setup
+
+```bash
+git clone https://github.com/YOUR_USERNAME/ep-ai-framing.git
+cd ep-ai-framing
+pip install -r requirements.txt --break-system-packages
+```
+
+Requires Python 3.10+ and PyTorch 2.2+. On Apple Silicon (MPS), set `device: mps` in `config.yaml`.
+
+## Pipeline
+
+Run scripts in order from the repo root:
+
+```bash
+# 1. Download corpus (~500MB)
+python src/00_download_data.py
+
+# 2. Filter to AI-relevant speeches
+python src/01_filter_corpus.py
+
+# 3. Classify framings (downloads model ~1.7GB on first run)
+python src/02_classify.py
+
+# 4. Validate against gold standard (after annotating validation/annotation_template.csv)
+python src/03_validate.py
+
+# 5. Analyse cleavage patterns
+python src/04_analyse.py
+```
+
+## Validation
+
+Before running `03_validate.py`, extend `validation/annotation_template.csv` to ~30 examples per framing class (120 total). The file has columns `text` and `true_label`. Valid `true_label` values:
+
+- `risk_based`
+- `rights_based`
+- `innovation_focused`
+- `sovereignty_focused`
+
+Target F1 >= 0.70 per class before proceeding to analysis.
+
+## Configuration
+
+All parameters are in `config.yaml`:
+
+- **keywords**: terms used to identify AI-relevant speeches
+- **framings**: hypothesis strings passed to the NLI classifier — edit these to refine classification
+- **party_family**: EP group to party family mapping
+- **east_countries / west_countries**: East-West cleavage coding
+- **north_countries / south_countries**: North-South cleavage coding
+
+## Notes on validity
+
+- English-only speeches are used directly; non-English speeches use EUPDCorp's machine translations
+- Translation quality varies across language communities — noted as a methods limitation
+- Regression analysis uses MEP-level aggregated scores to avoid bias from high-volume speakers (rapporteurs)
+- Standard errors clustered by country in OLS models
+
+## Citation
+
+If you use this code, please cite:
+
+- EUPDCorp: Zenodo DOI 10.5281/zenodo.15056399
+- Classifier: Laurer et al. (2023), arXiv:2312.17543
