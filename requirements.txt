@@ -5,6 +5,9 @@ pandas
 pyyaml
 scikit-learn
 statsmodels
+matplotlib
+scipy
 tqdm
 requests
+pyreadr
 jupyter

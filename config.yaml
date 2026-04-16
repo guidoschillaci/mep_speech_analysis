@@ -1,27 +1,66 @@
 data:
-  raw_path: "data/raw/EUPDCorp.csv"        # download from https://zenodo.org/records/15056399
+  raw_path: "data/raw/EUPDCorp.rds"        # download from https://zenodo.org/records/15056399
   output_path: "data/processed/ep_ai_speeches.csv"
   results_path: "data/processed/ep_ai_classified.csv"
   analysis_path: "data/processed/ep_ai_analysis.csv"
 
 corpus:
   keywords:
+    # Core AI terms
     - "artificial intelligence"
+    - "AI"          # matched as whole word only (\bAI\b) — see filter_corpus.py
     - "machine learning"
-    - "algorithm"
-    - "AI Act"
-    - "automated decision"
     - "deep learning"
     - "neural network"
+    - "large language model"
+    - "generative AI"
+    - "foundation model"
+    - "General-Purpose AI"
+    - "GPAI"
+    # EU policy & legislative terms
+    - "AI Act"
+    - "AIA"
+    - "AI liability"
+    - "high-risk AI"
+    - "conformity assessment"
+    - "AI Office"
+    - "AI system"
+    - "algorithmic"
+    - "automated decision"
+    - "automated decision-making"
+    # Applications frequently debated in EP
+    - "facial recognition"
+    - "biometric"
+    - "predictive policing"
+    - "autonomous weapon"
+    - "lethal autonomous"
+    - "chatbot"
+    - "deepfake"
+    # Broader tech sovereignty terms
+    - "technological sovereignty"
+    - "digital sovereignty"
+    - "data governance"
+    - "platform regulation"
+    - "robot"
+    - "robotics"
   min_speech_length: 100
   years: [2019, 2020, 2021, 2022, 2023, 2024]
   term: 9                                   # 9th EP term only
 
 model:
-  name: "MoritzLaurer/deberta-v3-large-zeroshot-v2.0"
+  #name: "MoritzLaurer/ModernBERT-large-zeroshot-v2.0"
+  name: "MoritzLaurer/deberta-v3-base-zeroshot-v2.0"
   device: "mps"                             # Apple Silicon; change to "cpu" if needed
-  batch_size: 16
-  multi_label: true
+  batch_size: 64
+  multi_label: false  # one dominant framing per speech — scores sum to 1
+  max_tokens: 256                           # truncate speeches; framing signal is early
+  fp16: true                                # half precision — faster on MPS/CUDA
+
+relevance_filter:
+  hypothesis: "This speech discusses artificial intelligence, machine learning, automated systems, or digital technology policy."
+  threshold: 0.01                          # entailment score above this = AI-relevant
+  batch_size: 128                           # can be larger than classify batch — single hypothesis
+  max_tokens: 256
 
 framings:
   risk_based:
@@ -38,21 +77,29 @@ framings:
     hypothesis: "This speech focuses on European strategic autonomy, technological sovereignty, or reducing dependency on non-European AI."
 
 analysis:
-  # Standard EP group to party family mapping
+  # EP group to party family mapping — keys are actual epg_short values in EUPDCorp
   party_family:
     EPP: "Christian Democrat / Conservative"
-    "S&D": "Social Democrat"
-    Renew: "Liberal"
-    "Greens/EFA": "Green / Regionalist"
+    SOCPESPASD: "Social Democrat"
+    ALDERE: "Liberal"
+    GEFA: "Green / Regionalist"
     ECR: "Conservative / Eurosceptic"
-    ID: "Radical Right"
-    "GUE-NGL": "Radical Left"
-    NI: "Non-attached"
+    NAT: "Radical Right"
+    GUENGL: "Radical Left"
+    IND: "Non-attached"
 
-  # East-West coding (2004+ accession countries = East)
-  east_countries: [PL, CZ, SK, HU, SI, EE, LV, LT, RO, BG, HR, CY, MT]
-  west_countries: [DE, FR, IT, ES, PT, NL, BE, LU, AT, SE, DK, FI, IE, GR]
+  # East-West and North-South are two INDEPENDENT cleavage dimensions — a country
+  # can appear in both (e.g. Estonia = East + North; Romania = East + South).
+  # Within each dimension the lists are mutually exclusive (no country in both
+  # east and west, or both north and south). Countries not in either list of a
+  # dimension are coded "Other" and excluded from regressions.
 
-  # North-South coding
-  north_countries: [SE, DK, FI, EE, LV, LT, DE, NL, BE, LU, AT, IE]
-  south_countries: [IT, ES, PT, GR, CY, MT, HR, SI, RO, BG]
+  # East-West: 2004+ accession countries = East; pre-2004 members = West
+  east_countries: [Poland, "Czech Republic", Slovakia, Hungary, Slovenia, Estonia, Latvia, Lithuania, Romania, Bulgaria, Croatia, Cyprus, Malta]
+  west_countries: [Germany, France, Italy, Spain, Portugal, Netherlands, Belgium, Luxembourg, Austria, Sweden, Denmark, Finland, Ireland, Greece]
+
+  # North-South: Nordic/Germanic/Franco core = North; Mediterranean/Balkan/Visegrád = South
+  # France added to North (core Western European axis); Poland, Czech Republic, Slovakia,
+  # Hungary added to South (periphery in EU political economy literature)
+  north_countries: [Sweden, Denmark, Finland, Estonia, Latvia, Lithuania, Germany, Netherlands, Belgium, Luxembourg, Austria, Ireland, France]
+  south_countries: [Italy, Spain, Portugal, Greece, Cyprus, Malta, Croatia, Slovenia, Romania, Bulgaria, Poland, "Czech Republic", Slovakia, Hungary]

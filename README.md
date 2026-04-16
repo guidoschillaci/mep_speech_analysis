@@ -37,9 +37,31 @@ ep-ai-framing/
 ## Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/ep-ai-framing.git
+git clone https://github.com/guidoschillaci/ep-ai-framing.git
 cd ep-ai-framing
-pip install -r requirements.txt --break-system-packages
+```
+
+### Python environment
+
+Create and activate a virtual environment (recommended):
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate        # macOS / Linux
+# .venv\Scripts\activate         # Windows
+```
+
+Or with conda:
+
+```bash
+conda create -n mep-speech python=3.11
+conda activate mep-speech
+```
+
+Then install dependencies:
+
+```bash
+pip install -r requirements.txt
 ```
 
 Requires Python 3.10+ and PyTorch 2.2+. On Apple Silicon (MPS), set `device: mps` in `config.yaml`.
@@ -52,14 +74,16 @@ Run scripts in order from the repo root:
 # 1. Download corpus (~500MB)
 python src/00_download_data.py
 
-# 2. Filter to AI-relevant speeches
+# 2. Filter to AI-relevant speeches using NLI relevance model
 python src/01_filter_corpus.py
 
-# 3. Classify framings (downloads model ~1.7GB on first run)
+# 3. Classify framings (downloads model ~400MB on first run)
 python src/02_classify.py
 
-# 4. Validate against gold standard (after annotating validation/annotation_template.csv)
-python src/03_validate.py
+# 4. Validate relevance filter and framing classifier
+python src/03_validate.py              # both stages
+python src/03_validate.py --stage relevance
+python src/03_validate.py --stage framing
 
 # 5. Analyse cleavage patterns
 python src/04_analyse.py
@@ -67,21 +91,32 @@ python src/04_analyse.py
 
 ## Validation
 
-Before running `03_validate.py`, extend `validation/annotation_template.csv` to ~30 examples per framing class (120 total). The file has columns `text` and `true_label`. Valid `true_label` values:
+`03_validate.py` validates two pipeline stages independently:
+
+### Stage 1 — Relevance filter
+
+Annotate `validation/relevance_annotation.csv` with columns `text` and `is_relevant` (1 = AI-relevant, 0 = not relevant). Aim for ~50 positive and ~50 negative examples drawn from real EP speeches.
+
+The script reports precision/recall/F1 at the configured threshold, ROC-AUC, and suggests an optimal threshold via Youden's J. Update `relevance_filter.threshold` in `config.yaml` if the suggestion differs substantially.
+
+### Stage 2 — Framing classifier
+
+Annotate `validation/annotation_template.csv` with columns `text` and `true_label`. Valid `true_label` values:
 
 - `risk_based`
 - `rights_based`
 - `innovation_focused`
 - `sovereignty_focused`
 
-Target F1 >= 0.70 per class before proceeding to analysis.
+Aim for ~30 examples per class (120 total). Target F1 >= 0.70 per class before proceeding to analysis.
 
 ## Configuration
 
 All parameters are in `config.yaml`:
 
-- **keywords**: terms used to identify AI-relevant speeches
-- **framings**: hypothesis strings passed to the NLI classifier — edit these to refine classification
+- **relevance_filter**: NLI hypothesis and threshold for the AI-relevance filter in `01_filter_corpus.py`
+- **framings**: hypothesis strings passed to the NLI framing classifier — edit these to refine classification
+- **model**: model name, device, batch size, precision, max token length
 - **party_family**: EP group to party family mapping
 - **east_countries / west_countries**: East-West cleavage coding
 - **north_countries / south_countries**: North-South cleavage coding

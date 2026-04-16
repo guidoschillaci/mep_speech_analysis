@@ -1,0 +1,5 @@
+text,true_label,score_risk_based,score_rights_based,score_innovation_focused,score_sovereignty_focused,predicted_label
+We must ensure that high-risk AI systems are properly regulated to prevent harm to citizens.,risk_based,0.998,0.0108,0.0047,0.0365,risk_based
+Algorithmic decision-making must be subject to full transparency and respect for fundamental rights.,rights_based,0.0606,0.9082,0.0023,0.0591,rights_based
+Excessive regulation will drive AI investment away from Europe and undermine our global competitiveness.,innovation_focused,0.032,0.0011,0.9937,0.2202,innovation_focused
+Europe cannot remain dependent on American or Chinese AI infrastructure for critical public services.,sovereignty_focused,0.0088,0.0002,0.0176,0.9858,sovereignty_focused
