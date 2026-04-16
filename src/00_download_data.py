@@ -1,18 +1,15 @@
 """
 Download EUPDCorp from Zenodo.
 DOI: 10.5281/zenodo.15056399
-Output: data/raw/EUPDCorp.csv
-
-NOTE: Check the exact filename at https://zenodo.org/records/15056399
-and update ZENODO_URL if it differs from EUPDCorp.csv.
+Output: data/raw/EUPDCorp.rds
 """
 
 import requests
 from pathlib import Path
 from tqdm import tqdm
 
-ZENODO_URL = "https://zenodo.org/records/15056399/files/EUPDCorp.csv"
-OUTPUT_PATH = Path("data/raw/EUPDCorp.csv")
+ZENODO_URL = "https://zenodo.org/records/15056399/files/EUPDCorp_1999-2024_v1.RDS"
+OUTPUT_PATH = Path("data/raw/EUPDCorp.rds")
 
 
 def download(url: str, dest: Path, chunk_size: int = 8192):
