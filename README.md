@@ -110,16 +110,29 @@ Annotate `validation/annotation_template.csv` with columns `text` and `true_labe
 
 Aim for ~30 examples per class (120 total). Target F1 >= 0.70 per class before proceeding to analysis.
 
+## Tests
+
+Unit tests cover the core data-transformation and analysis functions (no model loading required):
+
+```bash
+python -m pytest tests/ -v
+```
+
+Tests are in `tests/` and cover:
+- `test_filter_corpus.py` — text resolution, year/length filters, cleavage variable coding
+- `test_analyse.py` — framing share normalisation, MEP aggregation, dominant framing logic
+
 ## Configuration
 
 All parameters are in `config.yaml`:
 
-- **relevance_filter**: NLI hypothesis and threshold for the AI-relevance filter in `01_filter_corpus.py`
+- **relevance_filter**: NLI hypothesis and threshold for the AI-relevance filter in `01_filter_corpus.py`. Raise `threshold` (0–1) to retain fewer, more confidently AI-relevant speeches.
 - **framings**: hypothesis strings passed to the NLI framing classifier — edit these to refine classification
 - **model**: model name, device, batch size, precision, max token length
 - **party_family**: EP group to party family mapping
 - **east_countries / west_countries**: East-West cleavage coding
-- **north_countries / south_countries**: North-South cleavage coding
+- **north_countries / middle_countries / south_countries**: North-Middle-South cleavage coding
+- **pre2004_countries / post2004_countries**: EU accession wave coding
 
 ## Notes on validity
 

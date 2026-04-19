@@ -5,45 +5,7 @@ data:
   analysis_path: "data/processed/ep_ai_analysis.csv"
 
 corpus:
-  keywords:
-    # Core AI terms
-    - "artificial intelligence"
-    - "AI"          # matched as whole word only (\bAI\b) — see filter_corpus.py
-    - "machine learning"
-    - "deep learning"
-    - "neural network"
-    - "large language model"
-    - "generative AI"
-    - "foundation model"
-    - "General-Purpose AI"
-    - "GPAI"
-    # EU policy & legislative terms
-    - "AI Act"
-    - "AIA"
-    - "AI liability"
-    - "high-risk AI"
-    - "conformity assessment"
-    - "AI Office"
-    - "AI system"
-    - "algorithmic"
-    - "automated decision"
-    - "automated decision-making"
-    # Applications frequently debated in EP
-    - "facial recognition"
-    - "biometric"
-    - "predictive policing"
-    - "autonomous weapon"
-    - "lethal autonomous"
-    - "chatbot"
-    - "deepfake"
-    # Broader tech sovereignty terms
-    - "technological sovereignty"
-    - "digital sovereignty"
-    - "data governance"
-    - "platform regulation"
-    - "robot"
-    - "robotics"
-  min_speech_length: 100
+  min_speech_length: 100 # minimum character length of speeches to include; short speeches are often procedural and less likely to contain substantive framing
   years: [2019, 2020, 2021, 2022, 2023, 2024]
   term: 9                                   # 9th EP term only
 
@@ -51,16 +13,16 @@ model:
   #name: "MoritzLaurer/ModernBERT-large-zeroshot-v2.0"
   name: "MoritzLaurer/deberta-v3-base-zeroshot-v2.0"
   device: "mps"                             # Apple Silicon; change to "cpu" if needed
-  batch_size: 64
+  batch_size: 64      # smaller batch size for classification to avoid OOM errors; relevance filter can use larger batch size since it's single-label
   multi_label: false  # one dominant framing per speech — scores sum to 1
-  max_tokens: 256                           # truncate speeches; framing signal is early
-  fp16: true                                # half precision — faster on MPS/CUDA
+  max_tokens: 256     # truncate speeches; framing signal is early. One token is roughly 4 chars, so 256 tokens = ~1000 chars. Longer = more GPU memory and slower inference.
+  fp16: true          # half precision — faster on MPS/CUDA
 
 relevance_filter:
   hypothesis: "This speech discusses artificial intelligence, machine learning, automated systems, or digital technology policy."
-  threshold: 0.01                          # entailment score above this = AI-relevant
-  batch_size: 128                           # can be larger than classify batch — single hypothesis
-  max_tokens: 256
+  threshold: 0.70     # entailment score above this = AI-relevant
+  batch_size: 128     # can be larger than classify batch — single hypothesis
+  max_tokens: 256     # truncate speeches for relevance filter as well; the framing signal is often early, and this speeds up inference and reduces memory usage
 
 framings:
   risk_based:
@@ -95,11 +57,25 @@ analysis:
   # dimension are coded "Other" and excluded from regressions.
 
   # East-West: 2004+ accession countries = East; pre-2004 members = West
-  east_countries: [Poland, "Czech Republic", Slovakia, Hungary, Slovenia, Estonia, Latvia, Lithuania, Romania, Bulgaria, Croatia, Cyprus, Malta]
-  west_countries: [Germany, France, Italy, Spain, Portugal, Netherlands, Belgium, Luxembourg, Austria, Sweden, Denmark, Finland, Ireland, Greece]
+  east_countries: [Poland, "Czech Republic", Slovakia, Hungary, Slovenia, Estonia, Latvia, Lithuania, Romania, Bulgaria, Croatia]
+  west_countries: [Germany, France, Italy, Spain, Portugal, Netherlands, Belgium, Luxembourg, Austria, Sweden, Denmark, Finland, Ireland, Greece, Cyprus, Malta]
 
-  # North-South: Nordic/Germanic/Franco core = North; Mediterranean/Balkan/Visegrád = South
-  # France added to North (core Western European axis); Poland, Czech Republic, Slovakia,
-  # Hungary added to South (periphery in EU political economy literature)
-  north_countries: [Sweden, Denmark, Finland, Estonia, Latvia, Lithuania, Germany, Netherlands, Belgium, Luxembourg, Austria, Ireland, France]
-  south_countries: [Italy, Spain, Portugal, Greece, Cyprus, Malta, Croatia, Slovenia, Romania, Bulgaria, Poland, "Czech Republic", Slovakia, Hungary]
+  # EU accession wave (binary: pre-2004 vs post-2004)
+  # pre-2004: EU-15 founding/early members (joined before 2004 enlargement)
+  # post-2004: 2004 wave (CY, CZ, EE, HU, LT, LV, MT, PL, SI, SK),
+  #            2007 wave (BG, RO), 2013 wave (HR)
+  pre2004_countries:  [Germany, France, Italy, Spain, Portugal, Netherlands, Belgium,
+                       Luxembourg, Austria, Sweden, Denmark, Finland, Ireland, Greece]
+  post2004_countries: [Poland, "Czech Republic", Slovakia, Hungary, Slovenia,
+                       Estonia, Latvia, Lithuania, Romania, Bulgaria, Croatia,
+                       Cyprus, Malta]
+
+  # North-Middle-South tri-partition (replaces binary North-South)
+  # North:   Nordic + Baltic + Ireland
+  # Middle:  Germanic + Benelux + Franco core + Visegrád + Baltics already in North
+  # South:   Mediterranean (including Cyprus and Malta as island Western states)
+  north_countries:  [Sweden, Denmark, Finland, Estonia, Latvia, Lithuania, Ireland]
+  middle_countries: [Germany, France, Netherlands, Belgium, Luxembourg, Austria,
+                     Poland, "Czech Republic", Slovakia, Hungary, Romania]
+  south_countries:  [Italy, Spain, Portugal, Greece, Croatia, Slovenia,
+                     Bulgaria, Cyprus, Malta]

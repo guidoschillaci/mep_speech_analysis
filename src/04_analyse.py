@@ -139,7 +139,7 @@ def aggregate_to_mep(df: pd.DataFrame, score_cols: list) -> pd.DataFrame:
         "_speaker_id", "firstname", "lastname",
         "nationality", "country", "member_state",
         "epg_short", "epg_long", "party_name", "party_family",
-        "east_west", "north_south"
+        "east_west", "north_south", "accession"
     ] if c in df.columns]
 
     mep_scores = df.groupby("_speaker_id")[score_cols].mean().round(4)
@@ -156,68 +156,18 @@ def aggregate_to_mep(df: pd.DataFrame, score_cols: list) -> pd.DataFrame:
 # 3. OLS with clustered standard errors
 # -------------------------------------------------------------------
 
-def run_regressions(mep_df: pd.DataFrame, score_cols: list):
-    """
-    OLS for each framing score on party family + East-West + North-South dummies.
-
-    Reference categories:
-      party_family → Social Democrat  (centrist, largest left-of-centre group)
-      east_west    → West             (founding member states)
-      north_south  → North            (Nordic + Germanic bloc)
-
-    Clustering by country: MEPs from the same country share national political
-    context, media framing, and often coordinate within national delegations.
-    Ignoring this would understate standard errors.
-
-    "Other" in east_west/north_south (non-EU MEPs, e.g. UK post-Brexit, observers)
-    are excluded from regressions — they are not part of the EU cleavage structure
-    and their small N inflates coefficients artificially.
-
-    p < 0.15 is shown during exploration to surface weak signals worth
-    investigating. Tighten to p < 0.05 before reporting final results.
-
-    Note on R²: values of 0.02–0.07 are expected and substantively meaningful.
-    Party family and geography explain little of individual speech framing variance
-    — MEPs do not strongly follow party lines on AI governance language. The
-    within-group variance dominates. This is a finding, not a model failure.
-    """
-    try:
-        import statsmodels.formula.api as smf
-    except ImportError:
-        print("  statsmodels not installed. Run: pip install statsmodels")
-        return
-
-    # Drop "Other" — non-EU MEPs not part of the East/West or North/South cleavage
-    reg_df = mep_df[mep_df["east_west"] != "Other"].copy()
-    if "north_south" in reg_df.columns:
-        reg_df = reg_df[reg_df["north_south"] != "Other"].copy()
-    n_dropped = len(mep_df) - len(reg_df)
-    if n_dropped > 0:
-        print(f"\n  Dropped {n_dropped} MEPs coded 'Other' in east_west/north_south from regressions.")
-
-    regressors = []
-    if "party_family" in reg_df.columns:
-        regressors.append("C(party_family, Treatment('Social Democrat'))")
-    if "east_west" in reg_df.columns and reg_df["east_west"].nunique() > 1:
-        regressors.append("C(east_west, Treatment('West'))")
-    if "north_south" in reg_df.columns and reg_df["north_south"].nunique() > 1:
-        regressors.append("C(north_south, Treatment('North'))")
-
-    if not regressors:
-        print("  No regressor columns found.")
-        return
-
-    cluster_col = next(
-        (c for c in ["nationality", "country", "member_state"] if c in reg_df.columns), None
-    )
-    formula_rhs = " + ".join(regressors)
+def _fit_models(reg_df: pd.DataFrame, score_cols: list, formula_rhs: str,
+                cluster_col: str, model_label: str) -> dict:
+    """Fit OLS for each framing score and return a dict of fitted results."""
+    import statsmodels.formula.api as smf
 
     print("\n" + "=" * 60)
-    print("OLS REGRESSION RESULTS (MEP-level, clustered SEs by country)")
-    print(f"Reference: Social Democrat | West | North  |  N={len(reg_df)} MEPs")
+    print(f"OLS — {model_label}  (MEP-level, clustered SEs by country)")
+    print(f"Formula RHS: {formula_rhs}")
+    print(f"N = {len(reg_df)} MEPs")
     print("=" * 60)
 
-    results = {}  # collect fitted models for residual plots
+    results = {}
     for sc in score_cols:
         label = sc.replace("score_", "")
         formula = f"{sc} ~ {formula_rhs}"
@@ -239,10 +189,74 @@ def run_regressions(mep_df: pd.DataFrame, score_cols: list):
             print_diagnostics(result, label, reg_df, formula_rhs)
         except Exception as e:
             print(f"  Could not fit model for {label}: {e}")
+    return results
 
-    if results:
-        plot_residuals(results, reg_df)
-        plot_coefficients(results)
+
+def run_regressions(mep_df: pd.DataFrame, score_cols: list):
+    """
+    Run two separate OLS specifications to avoid collinearity between
+    east_west and accession (both partition countries on the same 2004
+    enlargement boundary → VIF ~7 when included together).
+
+    Model A — party_family + east_west
+        Tests whether post-enlargement Eastern MEPs differ from Western ones,
+        controlling for party family.
+
+    Model B — party_family + north_south + accession
+        Tests North/Middle/South geographic gradient AND accession wave
+        independently (they are orthogonal — e.g. Estonia is North + post-2004).
+
+    Reference categories:
+      party_family → Social Democrat
+      east_west    → West
+      north_south  → Middle
+      accession    → pre-2004
+
+    Clustering by country: MEPs from the same country share national political
+    context, media framing, and often coordinate in national delegations.
+
+    p < 0.15 shown during exploration — tighten to 0.05 for publication.
+    """
+    try:
+        import statsmodels.formula.api as smf  # noqa: F401
+    except ImportError:
+        print("  statsmodels not installed. Run: pip install statsmodels")
+        return
+
+    # Drop "Other" — non-EU MEPs not part of any cleavage dimension
+    reg_df = mep_df.copy()
+    for col in ["east_west", "north_south", "accession"]:
+        if col in reg_df.columns:
+            reg_df = reg_df[reg_df[col] != "Other"]
+    n_dropped = len(mep_df) - len(reg_df)
+    if n_dropped > 0:
+        print(f"\n  Dropped {n_dropped} MEPs coded 'Other' from regressions.")
+
+    cluster_col = next(
+        (c for c in ["nationality", "country", "member_state"] if c in reg_df.columns), None
+    )
+    pf = "C(party_family, Treatment('Social Democrat'))"
+
+    # --- Model A: party_family + east_west ---
+    rhs_a = [pf]
+    if "east_west" in reg_df.columns and reg_df["east_west"].nunique() > 1:
+        rhs_a.append("C(east_west, Treatment('West'))")
+    results_a = _fit_models(reg_df, score_cols, " + ".join(rhs_a), cluster_col,
+                            "Model A: party_family + east_west")
+
+    # --- Model B: party_family + north_south + accession ---
+    rhs_b = [pf]
+    if "north_south" in reg_df.columns and reg_df["north_south"].nunique() > 1:
+        rhs_b.append("C(north_south, Treatment('Middle'))")
+    if "accession" in reg_df.columns and reg_df["accession"].nunique() > 1:
+        rhs_b.append("C(accession, Treatment('pre-2004'))")
+    results_b = _fit_models(reg_df, score_cols, " + ".join(rhs_b), cluster_col,
+                            "Model B: party_family + north_south + accession")
+
+    if results_a or results_b:
+        plot_residuals(results_a, reg_df, suffix="model_a")
+        plot_residuals(results_b, reg_df, suffix="model_b")
+        plot_coefficients(results_a, results_b)
 
 
 def print_diagnostics(result, label: str, reg_df: pd.DataFrame, formula_rhs: str):
@@ -306,7 +320,7 @@ def print_diagnostics(result, label: str, reg_df: pd.DataFrame, formula_rhs: str
             print(f"    {short}: {v:.2f}")
 
 
-def plot_residuals(results: dict, reg_df: pd.DataFrame):
+def plot_residuals(results: dict, reg_df: pd.DataFrame, suffix: str = ""):
     """
     Four diagnostic plots per framing model, saved to data/processed/residual_plots.png:
 
@@ -379,7 +393,8 @@ def plot_residuals(results: dict, reg_df: pd.DataFrame):
         ax4.set_title(f"{label}\nResiduals vs Leverage")
         ax4.legend(fontsize=7)
 
-    out_path = Path("data/processed/residual_plots.png")
+    fname = f"residual_plots{'_' + suffix if suffix else ''}.png"
+    out_path = Path("data/processed") / fname
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"\n  Residual plots saved -> {out_path}")
@@ -389,13 +404,11 @@ def plot_residuals(results: dict, reg_df: pd.DataFrame):
 # 4. Descriptive plots
 # -------------------------------------------------------------------
 
-def plot_coefficients(results: dict):
+def plot_coefficients(results_a: dict, results_b: dict):
     """
-    Forest plot of OLS coefficients with 95% confidence intervals.
-    One panel per framing model, all predictors on the y-axis.
-    Coefficients to the right of zero = more of that framing relative to
-    the reference category (Social Democrat / West / North).
-    Only predictors with p < 0.15 are shown to keep the plot readable.
+    Forest plot of OLS coefficients with 95% CI for both model specifications.
+    Two rows: Model A (party + east_west) on top, Model B (party + north_south
+    + accession) on bottom. One column per framing. Only p < 0.15 shown.
     """
     COLORS = {
         "risk_based": "#d62728",
@@ -404,44 +417,63 @@ def plot_coefficients(results: dict):
         "sovereignty_focused": "#ff7f0e",
     }
 
-    labels = list(results.keys())
-    n = len(labels)
-    fig, axes = plt.subplots(1, n, figsize=(5 * n, 6), sharey=False)
-    if n == 1:
-        axes = [axes]
-
-    for ax, label in zip(axes, labels):
-        result = results[label]
-        coef_df = pd.DataFrame({
-            "coef": result.params,
-            "lower": result.conf_int()[0],
-            "upper": result.conf_int()[1],
-            "p": result.pvalues,
-        }).drop(index="Intercept", errors="ignore")
-        coef_df = coef_df[coef_df["p"] < 0.15].sort_values("coef")
-
-        # Shorten parameter names for readability
-        coef_df.index = (
-            coef_df.index
-            .str.replace(r"C\(party_family.*?\)\[T\.", "", regex=True)
-            .str.replace(r"C\(east_west.*?\)\[T\.", "EW: ", regex=True)
-            .str.replace(r"C\(north_south.*?\)\[T\.", "NS: ", regex=True)
-            .str.replace("]", "", regex=False)
+    def _shorten(idx):
+        return (
+            idx.str.replace(r"C\(party_family.*?\)\[T\.", "", regex=True)
+               .str.replace(r"C\(east_west.*?\)\[T\.", "EW: ", regex=True)
+               .str.replace(r"C\(north_south.*?\)\[T\.", "NS: ", regex=True)
+               .str.replace(r"C\(accession.*?\)\[T\.", "ACC: ", regex=True)
+               .str.replace("]", "", regex=False)
         )
 
-        color = COLORS.get(label, "steelblue")
-        y_pos = range(len(coef_df))
-        ax.barh(list(y_pos), coef_df["coef"], xerr=[
-            coef_df["coef"] - coef_df["lower"],
-            coef_df["upper"] - coef_df["coef"],
-        ], color=color, alpha=0.7, ecolor="black", capsize=3, height=0.5)
-        ax.axvline(0, color="black", linewidth=0.8, linestyle="--")
-        ax.set_yticks(list(y_pos))
-        ax.set_yticklabels(coef_df.index, fontsize=8)
-        ax.set_title(label.replace("_", " ").title(), fontsize=10, fontweight="bold")
-        ax.set_xlabel("Coefficient (ref: Social Democrat / West / North)")
+    def _coef_df(result):
+        df = pd.DataFrame({
+            "coef":  result.params,
+            "lower": result.conf_int()[0],
+            "upper": result.conf_int()[1],
+            "p":     result.pvalues,
+        }).drop(index="Intercept", errors="ignore")
+        df = df[df["p"] < 0.15].sort_values("coef")
+        df.index = _shorten(df.index)
+        return df
 
-    fig.suptitle("OLS Coefficients with 95% CI (p < 0.15, MEP level)", fontsize=12)
+    labels = list(results_a.keys())
+    n = len(labels)
+    fig, axes = plt.subplots(2, n, figsize=(5 * n, 10))
+    if n == 1:
+        axes = axes.reshape(2, 1)
+
+    for col, label in enumerate(labels):
+        color = COLORS.get(label, "steelblue")
+        for row, (results, model_name) in enumerate([
+            (results_a, "Model A: party + east/west"),
+            (results_b, "Model B: party + N/M/S + accession"),
+        ]):
+            ax = axes[row, col]
+            if label not in results:
+                ax.set_visible(False)
+                continue
+            cdf = _coef_df(results[label])
+            if cdf.empty:
+                ax.text(0.5, 0.5, "no significant\npredictors (p<0.15)",
+                        ha="center", va="center", transform=ax.transAxes, fontsize=8)
+                ax.set_title(f"{label.replace('_', ' ').title()}\n{model_name}",
+                             fontsize=9, fontweight="bold")
+                continue
+            y_pos = range(len(cdf))
+            ax.barh(list(y_pos), cdf["coef"], xerr=[
+                cdf["coef"] - cdf["lower"],
+                cdf["upper"] - cdf["coef"],
+            ], color=color, alpha=0.7, ecolor="black", capsize=3, height=0.5)
+            ax.axvline(0, color="black", linewidth=0.8, linestyle="--")
+            ax.set_yticks(list(y_pos))
+            ax.set_yticklabels(cdf.index, fontsize=8)
+            ax.set_title(f"{label.replace('_', ' ').title()}\n{model_name}",
+                         fontsize=9, fontweight="bold")
+            ax.set_xlabel("Coefficient", fontsize=8)
+
+    fig.suptitle("OLS Coefficients with 95% CI  (p < 0.15, MEP level)", fontsize=12)
+    fig.tight_layout()
     out_path = Path("data/processed/coefficient_plot.png")
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -490,7 +522,249 @@ def plot_framing_heatmap(df: pd.DataFrame, group_col: str, score_cols: list,
 
 
 # -------------------------------------------------------------------
-# 5. Main
+# 5. Additional descriptive plots
+# -------------------------------------------------------------------
+
+def plot_framing_over_time(df: pd.DataFrame, score_cols: list):
+    """
+    Line chart of mean framing share (%) per year, 2019–2024.
+
+    Two panels:
+      Left  — all four framings as lines, showing the full trend.
+      Right — stacked area chart for a compositional view (shares sum to 100%).
+
+    Key events to look for:
+      2020: first AI White Paper (Feb)
+      2021: AI Act proposal (Apr)
+      2022: ChatGPT launch (Nov) → expect innovation/sovereignty shift
+      2023: AI Act trilogue
+      2024: AI Act adopted (Mar)
+    """
+    if "year" not in df.columns:
+        print("  'year' column not found, skipping time trend plot.")
+        return
+
+    agg = df.groupby("year")[score_cols].mean()
+    # Normalise to % per year so the four lines sum to 100
+    agg_pct = (agg.div(agg.sum(axis=1), axis=0) * 100).round(2)
+    agg_pct.columns = [c.replace("score_", "").replace("_", " ") for c in score_cols]
+
+    FRAMING_COLORS = {
+        "risk based":          "#d62728",
+        "rights based":        "#1f77b4",
+        "innovation focused":  "#2ca02c",
+        "sovereignty focused": "#ff7f0e",
+    }
+    # Add speech count per year for annotation
+    n_per_year = df.groupby("year").size()
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
+
+    # --- Left: line chart ---
+    for col in agg_pct.columns:
+        color = FRAMING_COLORS.get(col, "grey")
+        ax1.plot(agg_pct.index, agg_pct[col], marker="o", linewidth=2,
+                 markersize=5, label=col, color=color)
+
+    # Annotate key policy events
+    events = {
+        2021: "AI Act\nproposal",
+        2022: "ChatGPT\nlaunched",
+        2024: "AI Act\nadopted",
+    }
+    for year, label in events.items():
+        if year in agg_pct.index:
+            ax1.axvline(year, color="grey", linewidth=0.8, linestyle="--", alpha=0.6)
+            ax1.text(year + 0.05, ax1.get_ylim()[1] if ax1.get_ylim()[1] > 0 else 45,
+                     label, fontsize=6.5, color="grey", va="top")
+
+    ax1.set_xlabel("Year")
+    ax1.set_ylabel("Framing share (%)")
+    ax1.set_title("Framing trends over time", fontweight="bold")
+    ax1.legend(fontsize=8)
+    ax1.set_xticks(agg_pct.index)
+    # Annotate N speeches per year below x-axis
+    for year, n in n_per_year.items():
+        ax1.annotate(f"n={n}", xy=(year, ax1.get_ylim()[0]),
+                     xytext=(0, -18), textcoords="offset points",
+                     ha="center", fontsize=6.5, color="grey")
+
+    # --- Right: stacked area ---
+    ax2.stackplot(agg_pct.index, agg_pct.T.values,
+                  labels=agg_pct.columns,
+                  colors=[FRAMING_COLORS.get(c, "grey") for c in agg_pct.columns],
+                  alpha=0.8)
+    for year, label in events.items():
+        if year in agg_pct.index:
+            ax2.axvline(year, color="white", linewidth=1.0, linestyle="--", alpha=0.7)
+    ax2.set_xlabel("Year")
+    ax2.set_ylabel("Framing share (%)")
+    ax2.set_title("Framing composition over time", fontweight="bold")
+    ax2.legend(fontsize=8, loc="upper left")
+    ax2.set_xticks(agg_pct.index)
+    ax2.set_ylim(0, 100)
+
+    fig.tight_layout()
+    out_path = Path("data/processed/framing_over_time.png")
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Time trend plot saved -> {out_path}")
+
+
+def plot_scatter_innovation_sovereignty(mep_df: pd.DataFrame, score_cols: list):
+    """
+    Scatter of MEP-level innovation_focused vs sovereignty_focused scores,
+    coloured by party family. Shows within- and between-party variance that
+    regressions summarise into single coefficients.
+    """
+    if "score_innovation_focused" not in mep_df.columns or \
+       "score_sovereignty_focused" not in mep_df.columns:
+        return
+
+    PARTY_COLORS = {
+        "Christian Democrat / Conservative": "#1f77b4",
+        "Social Democrat":                   "#d62728",
+        "Liberal":                           "#ff7f0e",
+        "Green / Regionalist":               "#2ca02c",
+        "Conservative / Eurosceptic":        "#9467bd",
+        "Radical Right":                     "#8c564b",
+        "Radical Left":                      "#e377c2",
+        "Non-attached":                      "#7f7f7f",
+    }
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    parties = mep_df["party_family"].dropna().unique() if "party_family" in mep_df.columns else []
+    for party in sorted(parties):
+        sub = mep_df[mep_df["party_family"] == party]
+        color = PARTY_COLORS.get(party, "grey")
+        ax.scatter(sub["score_innovation_focused"], sub["score_sovereignty_focused"],
+                   label=party, color=color, alpha=0.6, s=30)
+
+    ax.set_xlabel("Innovation-focused score")
+    ax.set_ylabel("Sovereignty-focused score")
+    ax.set_title("MEP framing: innovation vs sovereignty (by party family)", fontweight="bold")
+    ax.legend(fontsize=7, loc="upper left", bbox_to_anchor=(1, 1))
+    ax.axline((0.25, 0.25), slope=1, color="grey", linewidth=0.7,
+              linestyle="--", label="equal scores")
+    fig.tight_layout()
+    out_path = Path("data/processed/scatter_innovation_sovereignty.png")
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Scatter plot saved -> {out_path}")
+
+
+def plot_top_meps(mep_df: pd.DataFrame, score_cols: list, top_n: int = 10):
+    """
+    Horizontal bar charts of the top N MEPs by averaged framing score,
+    one panel per framing. Useful for qualitative validation — check whether
+    the top-ranked MEPs are those you'd expect (rapporteurs, committee chairs).
+    """
+    name_col = None
+    if "firstname" in mep_df.columns and "lastname" in mep_df.columns:
+        mep_df = mep_df.copy()
+        mep_df["_name"] = mep_df["firstname"] + " " + mep_df["lastname"]
+        name_col = "_name"
+    elif "speaker_name" in mep_df.columns:
+        name_col = "speaker_name"
+    if name_col is None:
+        return
+
+    PARTY_COLORS = {
+        "Christian Democrat / Conservative": "#1f77b4",
+        "Social Democrat":                   "#d62728",
+        "Liberal":                           "#ff7f0e",
+        "Green / Regionalist":               "#2ca02c",
+        "Conservative / Eurosceptic":        "#9467bd",
+        "Radical Right":                     "#8c564b",
+        "Radical Left":                      "#e377c2",
+        "Non-attached":                      "#7f7f7f",
+    }
+
+    n = len(score_cols)
+    fig, axes = plt.subplots(1, n, figsize=(5 * n, 6))
+    if n == 1:
+        axes = [axes]
+
+    for ax, sc in zip(axes, score_cols):
+        label = sc.replace("score_", "").replace("_", " ").title()
+        top = mep_df.nlargest(top_n, sc)[[name_col, sc, "party_family"]].copy() \
+                    if "party_family" in mep_df.columns \
+                    else mep_df.nlargest(top_n, sc)[[name_col, sc]].copy()
+        top = top.sort_values(sc)
+
+        bar_colors = [PARTY_COLORS.get(pf, "grey")
+                      for pf in top.get("party_family", ["grey"] * len(top))]
+
+        ax.barh(top[name_col], top[sc], color=bar_colors, alpha=0.8)
+        ax.set_xlabel("Avg framing score")
+        ax.set_title(f"Top {top_n} MEPs\n{label}", fontweight="bold", fontsize=9)
+        ax.tick_params(axis="y", labelsize=7)
+
+    # Shared legend for party colours, placed below all panels
+    from matplotlib.patches import Patch
+    present_parties = mep_df["party_family"].dropna().unique() \
+        if "party_family" in mep_df.columns else []
+    legend_handles = [
+        Patch(color=PARTY_COLORS.get(p, "grey"), label=p, alpha=0.8)
+        for p in sorted(present_parties)
+        if p in PARTY_COLORS
+    ]
+    fig.legend(handles=legend_handles, title="Party family", fontsize=7,
+               title_fontsize=8, loc="lower center",
+               ncol=min(len(legend_handles), 4),
+               bbox_to_anchor=(0.5, -0.08))
+
+    fig.suptitle(f"Top {top_n} MEPs per framing (MEP-level avg score)", fontsize=11)
+    fig.tight_layout()
+    out_path = Path("data/processed/top_meps.png")
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Top MEPs plot saved -> {out_path}")
+
+
+def plot_country_bars(df: pd.DataFrame, score_cols: list):
+    """
+    Horizontal stacked bar chart of framing share (%) by country,
+    sorted by sovereignty_focused score descending. Easier to read
+    than the heatmap for country-level comparisons.
+    """
+    nat_col = next(
+        (c for c in ["nationality", "country", "member_state"] if c in df.columns), None
+    )
+    if nat_col is None:
+        return
+
+    agg = df.groupby(nat_col)[score_cols].mean()
+    agg_pct = (agg.div(agg.sum(axis=1), axis=0) * 100).round(1)
+    agg_pct.columns = [c.replace("score_", "").replace("_", " ") for c in score_cols]
+
+    # Sort by sovereignty_focused descending
+    sort_col = next((c for c in agg_pct.columns if "sovereignty" in c), agg_pct.columns[-1])
+    agg_pct = agg_pct.sort_values(sort_col, ascending=True)
+
+    FRAMING_COLORS = ["#d62728", "#1f77b4", "#2ca02c", "#ff7f0e"]
+
+    fig, ax = plt.subplots(figsize=(8, max(5, len(agg_pct) * 0.35)))
+    left = np.zeros(len(agg_pct))
+    for col, color in zip(agg_pct.columns, FRAMING_COLORS):
+        ax.barh(agg_pct.index, agg_pct[col], left=left, label=col,
+                color=color, alpha=0.85)
+        left += agg_pct[col].values
+
+    ax.set_xlabel("Framing share (%)")
+    ax.set_title("Framing distribution by country\n(sorted by sovereignty score)",
+                 fontweight="bold")
+    ax.legend(fontsize=8, loc="lower right")
+    ax.set_xlim(0, 100)
+    fig.tight_layout()
+    out_path = Path("data/processed/country_bars.png")
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Country bar chart saved -> {out_path}")
+
+
+# -------------------------------------------------------------------
+# 6. Main
 # -------------------------------------------------------------------
 
 def main():
@@ -510,9 +784,14 @@ def main():
     print(table_by_group(df, "east_west", scols).to_string())
 
     print("\n" + "=" * 60)
-    print("FRAMING BY NORTH-SOUTH (speech level, % of total score)")
+    print("FRAMING BY NORTH-MIDDLE-SOUTH (speech level, % of total score)")
     print("=" * 60)
     print(table_by_group(df, "north_south", scols).to_string())
+
+    print("\n" + "=" * 60)
+    print("FRAMING BY ACCESSION WAVE (speech level, % of total score)")
+    print("=" * 60)
+    print(table_by_group(df, "accession", scols).to_string())
 
     nat_col = next(
         (c for c in ["nationality", "country", "member_state"] if c in df.columns), None
@@ -544,6 +823,12 @@ def main():
         plot_framing_heatmap(df, nat_col, scols,
                              "Framing Share by Country (speech level)",
                              "heatmap_country.png")
+
+    # --- Additional descriptive plots ---
+    plot_framing_over_time(df, scols)
+    plot_scatter_innovation_sovereignty(mep_df, scols)
+    plot_top_meps(mep_df, scols, top_n=10)
+    plot_country_bars(df, scols)
 
     # --- Regressions + plots ---
     run_regressions(mep_df, scols)
